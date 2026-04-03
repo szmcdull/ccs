@@ -1,3 +1,22 @@
+## [7.65.3](https://github.com/kaitranntt/ccs/compare/v7.65.2...v7.65.3) (2026-04-02)
+
+### Hotfixes
+
+* **ci:** restore default ai review output ([58a0fc4](https://github.com/kaitranntt/ccs/commit/58a0fc43e6ce89be7288bb14d4a20ac4165320f0))
+
+## [7.65.2](https://github.com/kaitranntt/ccs/compare/v7.65.1...v7.65.2) (2026-04-02)
+
+### Hotfixes
+
+* **ci:** clean up ai review reruns and logging ([f47e7ae](https://github.com/kaitranntt/ccs/commit/f47e7ae5a752f20138d6a06b8760143608e18509))
+* **ci:** compact ai review comments and switch to glm-5-turbo ([25dddf4](https://github.com/kaitranntt/ccs/commit/25dddf47073673625e51106ab614f8a49ce3b758))
+* **ci:** expand ai review comment layout ([0be4ef7](https://github.com/kaitranntt/ccs/commit/0be4ef7a0d747db28f0db029f10a25ca18a6182d))
+* **ci:** improve ai review comment formatting ([164a8af](https://github.com/kaitranntt/ccs/commit/164a8af82a9661d2aa3bcd8e2aeca862f343c547))
+* **ci:** preserve literal snippet indentation in ai review comments ([f6779a5](https://github.com/kaitranntt/ccs/commit/f6779a503aa13e616d7d642f7c2cc3d769e97efb))
+* **ci:** render fenced evidence snippets in ai review comments ([07b4275](https://github.com/kaitranntt/ccs/commit/07b4275543f7431cad349fabccce9d4149089b90))
+* **ci:** restore reliable structured ai review comments ([5b9427f](https://github.com/kaitranntt/ccs/commit/5b9427f8a02b583222be0772d2e1b45a5eb43ba7))
+* **ci:** separate ai review evidence blocks ([80e2251](https://github.com/kaitranntt/ccs/commit/80e22515b016c4661ed1cdbdd432e5c0068afc03))
+
 ## [7.65.1](https://github.com/kaitranntt/ccs/compare/v7.65.0...v7.65.1) (2026-04-02)
 
 ### Hotfixes

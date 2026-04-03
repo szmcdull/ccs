@@ -113,7 +113,7 @@ describe('prepare-ai-review-scope', () => {
     expect(scope.scopeLabel).toBe('changed files');
   });
 
-  test('shrinks triage scope for xlarge PRs to keep hotspot reviews fast', () => {
+  test('keeps broad triage coverage for xlarge PRs when the review packet can still fit', () => {
     const scope = reviewScope.buildReviewScope(
       reviewScope.normalizePullFiles([
         {
@@ -161,19 +161,19 @@ describe('prepare-ai-review-scope', () => {
       { sizeClass: 'xlarge' }
     );
 
-    expect(scope.selected.length).toBeLessThanOrEqual(4);
+    expect(scope.selected.length).toBe(5);
     expect(scope.selected.map((file: { filename: string }) => file.filename)).toEqual(
       expect.arrayContaining([
         '.github/workflows/ai-review.yml',
         'scripts/github/prepare-ai-review-scope.mjs',
       ])
     );
-    expect(scope.selectedChanges).toBeLessThanOrEqual(360);
+    expect(scope.selectedChanges).toBe(490);
     expect(scope.limits).toEqual({
-      maxFiles: 4,
-      maxChangedLines: 360,
-      maxPatchLines: 45,
-      maxPatchChars: 3200,
+      maxFiles: 24,
+      maxChangedLines: 2400,
+      maxPatchLines: 140,
+      maxPatchChars: 12000,
     });
   });
 
@@ -202,10 +202,12 @@ describe('prepare-ai-review-scope', () => {
     });
 
     expect(markdown).toContain('# AI Review Scope');
-    expect(markdown).toContain('- Mode: `triage` (hotspot-based bounded review (non-exhaustive))');
+    expect(markdown).toContain('- Mode: `triage` (expanded packaged review with broader coverage)');
     expect(markdown).toContain('- Selected files: 1 of 1 reviewable files (1 total changed files)');
+    expect(markdown).toContain('- Turn budget: 6');
+    expect(markdown).toContain('- Workflow cap: 5 minutes');
     expect(markdown).toContain('````diff');
     expect(markdown).toContain('```');
-    expect(markdown).toContain('... patch trimmed for bounded review ...');
+    expect(markdown).not.toContain('... patch trimmed for bounded review ...');
   });
 });

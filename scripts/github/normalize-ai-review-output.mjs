@@ -14,6 +14,11 @@ const SEVERITY_HEADERS = {
   medium: '### 🟡 Medium',
   low: '### 🟢 Low',
 };
+const SEVERITY_SUMMARY_LABELS = {
+  high: '🔴 High',
+  medium: '🟡 Medium',
+  low: '🟢 Low',
+};
 
 const STATUS_LABELS = {
   pass: '✅',
@@ -22,9 +27,9 @@ const STATUS_LABELS = {
 };
 
 const REVIEW_MODE_DETAILS = {
-  fast: 'diff-focused bounded review',
-  triage: 'hotspot-based bounded review (non-exhaustive)',
-  deep: 'expanded surrounding-code review',
+  fast: 'selected-file packaged review',
+  triage: 'expanded packaged review with broader coverage',
+  deep: 'maintainer-triggered expanded packet review',
 };
 
 const RENDERER_OWNED_MARKUP_PATTERNS = [
@@ -35,12 +40,38 @@ const RENDERER_OWNED_MARKUP_PATTERNS = [
   { pattern: /```/u, reason: 'code fence' },
 ];
 
+const INLINE_CODE_TOKEN_PATTERN =
+  /\b[A-Za-z_][A-Za-z0-9_.]*\([^()\n]*\)|(?<![\w`])\.?[\w-]+(?:\/[\w.-]+)+\.[\w.-]+(?::\d+)?|\b[\w.-]+\/[\w.-]+@[\w.-]+\b|--[a-z0-9][a-z0-9-]*\b|\b[A-Z][A-Z0-9]*_[A-Z0-9_]+\b|\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b/gu;
+const CODE_BLOCK_LANGUAGE_PATTERN = /^[A-Za-z0-9#+.-]{1,20}$/u;
+const MAX_FINDING_SNIPPETS = 2;
+const MAX_SNIPPET_LINES = 20;
+const MAX_SNIPPET_CHARACTERS = 1200;
+const TOP_FINDINGS_LIMIT = 3;
+
 function cleanText(value) {
   return typeof value === 'string' ? value.trim().replace(/\s+/g, ' ') : '';
 }
 
+function cleanMultilineText(value) {
+  if (typeof value !== 'string') {
+    return '';
+  }
+
+  return value
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .replace(/^\n+/u, '')
+    .replace(/\n+$/u, '');
+}
+
+function escapeMarkdown(value) {
+  return String(value)
+    .replace(/\\/g, '\\\\')
+    .replace(/([`*_{}[\]<>|])/g, '\\$1');
+}
+
 function escapeMarkdownText(value) {
-  return cleanText(value).replace(/\\/g, '\\\\').replace(/([`*_{}[\]<>|])/g, '\\$1');
+  return escapeMarkdown(cleanText(value));
 }
 
 function renderCode(value) {
@@ -48,6 +79,38 @@ function renderCode(value) {
   const longestFence = Math.max(...[...text.matchAll(/`+/g)].map((match) => match[0].length), 0);
   const fence = '`'.repeat(longestFence + 1);
   return `${fence}${text}${fence}`;
+}
+
+function renderCodeBlock(value, language) {
+  const text = cleanMultilineText(value);
+  const longestFence = Math.max(...[...text.matchAll(/`+/gu)].map((match) => match[0].length), 0);
+  const fence = '`'.repeat(Math.max(3, longestFence + 1));
+  const info = cleanText(language);
+  return `${fence}${info}\n${text}\n${fence}`;
+}
+
+function renderInlineText(value) {
+  const text = cleanText(value);
+  if (!text) {
+    return '';
+  }
+
+  let rendered = '';
+  let lastIndex = 0;
+  for (const match of text.matchAll(INLINE_CODE_TOKEN_PATTERN)) {
+    const token = match[0];
+    const index = match.index ?? 0;
+    if (index < lastIndex) {
+      continue;
+    }
+
+    rendered += escapeMarkdown(text.slice(lastIndex, index));
+    rendered += renderCode(token);
+    lastIndex = index + token.length;
+  }
+
+  rendered += escapeMarkdown(text.slice(lastIndex));
+  return rendered;
 }
 
 function parsePositiveInteger(value) {
@@ -77,6 +140,9 @@ function normalizeRenderingMetadata(raw) {
   const reviewableFiles = parsePositiveInteger(raw.reviewableFiles);
   const selectedChanges = parsePositiveInteger(raw.selectedChanges);
   const reviewableChanges = parsePositiveInteger(raw.reviewableChanges);
+  const packetIncludedFiles = parsePositiveInteger(raw.packetIncludedFiles);
+  const packetTotalFiles = parsePositiveInteger(raw.packetTotalFiles);
+  const packetOmittedFiles = parsePositiveInteger(raw.packetOmittedFiles);
   const scopeLabel = cleanText(raw.scopeLabel).toLowerCase();
   const metadata = {};
 
@@ -88,7 +154,11 @@ function normalizeRenderingMetadata(raw) {
   if (reviewableFiles) metadata.reviewableFiles = reviewableFiles;
   if (selectedChanges) metadata.selectedChanges = selectedChanges;
   if (reviewableChanges) metadata.reviewableChanges = reviewableChanges;
-  if (scopeLabel === 'reviewable files' || scopeLabel === 'changed files') metadata.scopeLabel = scopeLabel;
+  if (packetIncludedFiles !== null) metadata.packetIncludedFiles = packetIncludedFiles;
+  if (packetTotalFiles !== null) metadata.packetTotalFiles = packetTotalFiles;
+  if (packetOmittedFiles !== null) metadata.packetOmittedFiles = packetOmittedFiles;
+  if (scopeLabel === 'reviewable files' || scopeLabel === 'changed files')
+    metadata.scopeLabel = scopeLabel;
 
   return metadata;
 }
@@ -136,41 +206,69 @@ function formatScopeSummary(rendering) {
     typeof rendering.selectedChanges === 'number' &&
     typeof rendering.reviewableChanges === 'number'
   ) {
-    const changeLabel = scopeLabel === 'reviewable files' ? 'reviewable changed lines' : 'changed lines';
+    const changeLabel =
+      scopeLabel === 'reviewable files' ? 'reviewable changed lines' : 'changed lines';
     return `${fileScope}; ${rendering.selectedChanges}/${rendering.reviewableChanges} ${changeLabel}`;
   }
 
   return fileScope;
 }
 
+function formatPacketCoverage(rendering) {
+  if (
+    typeof rendering.packetIncludedFiles !== 'number' ||
+    typeof rendering.packetTotalFiles !== 'number'
+  ) {
+    return null;
+  }
+
+  const packetSummary = `${rendering.packetIncludedFiles}/${rendering.packetTotalFiles} selected files included in the final review packet`;
+  if (typeof rendering.packetOmittedFiles === 'number' && rendering.packetOmittedFiles > 0) {
+    return `${packetSummary}; ${rendering.packetOmittedFiles} selected file${rendering.packetOmittedFiles === 1 ? '' : 's'} omitted for packet budget`;
+  }
+
+  return packetSummary;
+}
+
 function formatReviewContext(rendering) {
   const parts = [];
 
   if (rendering.mode) {
-    parts.push(`mode ${renderCode(rendering.mode)}`);
-    parts.push(REVIEW_MODE_DETAILS[rendering.mode]);
+    parts.push(renderCode(rendering.mode));
   }
 
-  const scopeSummary = formatScopeSummary(rendering);
-  if (scopeSummary) {
-    parts.push(`scope ${scopeSummary}`);
+  if (
+    typeof rendering.selectedFiles === 'number' &&
+    typeof rendering.reviewableFiles === 'number'
+  ) {
+    parts.push(`${rendering.selectedFiles}/${rendering.reviewableFiles} files`);
   }
 
-  const turnBudget = formatTurnBudget(rendering);
-  if (turnBudget) {
-    parts.push(`turn budget ${turnBudget}`);
+  if (
+    typeof rendering.selectedChanges === 'number' &&
+    typeof rendering.reviewableChanges === 'number'
+  ) {
+    parts.push(`${rendering.selectedChanges}/${rendering.reviewableChanges} lines`);
   }
 
-  const timeBudget = formatTimeBudget(rendering);
-  if (timeBudget) {
-    parts.push(`workflow cap ${timeBudget}`);
+  if (
+    typeof rendering.packetIncludedFiles === 'number' &&
+    typeof rendering.packetTotalFiles === 'number'
+  ) {
+    parts.push(`packet ${rendering.packetIncludedFiles}/${rendering.packetTotalFiles}`);
+  }
+
+  const runtimeBudget =
+    formatCombinedBudget(rendering) || formatTimeBudget(rendering) || formatTurnBudget(rendering);
+  if (runtimeBudget) {
+    parts.push(runtimeBudget);
   }
 
   if (parts.length === 0) {
     return null;
   }
 
-  return `> 🧭 Review context: ${parts.join('; ')}.`;
+  return `> 🧭 ${parts.join(' • ')}`;
 }
 
 function classifyFallbackReason(reason) {
@@ -208,7 +306,10 @@ function describeIncompleteOutcome({ reason, rendering, turnsUsed, status }) {
     return `The ${reviewLabel} ended before it could produce validated structured output within the available ${combinedBudget} runtime budget.`;
   }
 
-  if (classifyFallbackReason(reason) === 'missing' || classifyFallbackReason(reason) === 'invalid_json') {
+  if (
+    classifyFallbackReason(reason) === 'missing' ||
+    classifyFallbackReason(reason) === 'invalid_json'
+  ) {
     return `The ${reviewLabel} ended without validated structured output, so the normalizer published the safe fallback comment instead.`;
   }
 
@@ -251,7 +352,10 @@ function normalizeChecklistRows(fieldName, labelField, raw) {
 
   const rows = [];
   for (const [index, item] of raw.entries()) {
-    const label = validatePlainTextField(`${fieldName}[${index}].${labelField}`, item?.[labelField]);
+    const label = validatePlainTextField(
+      `${fieldName}[${index}].${labelField}`,
+      item?.[labelField]
+    );
     if (!label.ok) return label;
 
     const notes = validatePlainTextField(`${fieldName}[${index}].notes`, item?.notes);
@@ -270,6 +374,74 @@ function normalizeChecklistRows(fieldName, labelField, raw) {
   }
 
   return { ok: true, value: rows };
+}
+
+function normalizeFindingSnippets(fieldName, raw) {
+  if (raw === null || raw === undefined) {
+    return { ok: true, value: [] };
+  }
+
+  if (!Array.isArray(raw)) {
+    return { ok: false, reason: `${fieldName} must be an array` };
+  }
+
+  if (raw.length > MAX_FINDING_SNIPPETS) {
+    return {
+      ok: false,
+      reason: `${fieldName} must contain at most ${MAX_FINDING_SNIPPETS} snippets`,
+    };
+  }
+
+  const snippets = [];
+  for (const [index, item] of raw.entries()) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) {
+      return { ok: false, reason: `${fieldName}[${index}] must be an object` };
+    }
+
+    let label = null;
+    if (Object.hasOwn(item, 'label') && item.label !== null && item.label !== undefined) {
+      const labelValidation = validatePlainTextField(`${fieldName}[${index}].label`, item.label);
+      if (!labelValidation.ok) return labelValidation;
+      label = labelValidation.value;
+    }
+
+    let language = null;
+    if (Object.hasOwn(item, 'language') && item.language !== null && item.language !== undefined) {
+      const normalizedLanguage = cleanText(item.language).toLowerCase();
+      if (normalizedLanguage) {
+        if (!CODE_BLOCK_LANGUAGE_PATTERN.test(normalizedLanguage)) {
+          return { ok: false, reason: `${fieldName}[${index}].language is invalid` };
+        }
+        language = normalizedLanguage;
+      }
+    }
+
+    const code = cleanMultilineText(item.code);
+    if (!code) {
+      return { ok: false, reason: `${fieldName}[${index}].code is required` };
+    }
+    if (code.length > MAX_SNIPPET_CHARACTERS) {
+      return {
+        ok: false,
+        reason: `${fieldName}[${index}].code exceeds ${MAX_SNIPPET_CHARACTERS} characters`,
+      };
+    }
+
+    const lineCount = code.split('\n').length;
+    if (lineCount > MAX_SNIPPET_LINES) {
+      return {
+        ok: false,
+        reason: `${fieldName}[${index}].code exceeds ${MAX_SNIPPET_LINES} lines`,
+      };
+    }
+
+    const snippet = { code };
+    if (label) snippet.label = label;
+    if (language) snippet.language = language;
+    snippets.push(snippet);
+  }
+
+  return { ok: true, value: snippets };
 }
 
 function readExecutionMetadata(executionFile) {
@@ -317,14 +489,22 @@ function formatHotspotFiles(files) {
 
 function formatRemainingCoverage(rendering) {
   if (
-    typeof rendering.selectedFiles !== 'number' ||
-    typeof rendering.reviewableFiles !== 'number'
+    typeof rendering.reviewableFiles !== 'number' ||
+    (typeof rendering.packetIncludedFiles !== 'number' &&
+      typeof rendering.selectedFiles !== 'number')
   ) {
     return null;
   }
 
-  const remainingFiles = Math.max(rendering.reviewableFiles - rendering.selectedFiles, 0);
+  const coveredFiles =
+    typeof rendering.packetIncludedFiles === 'number'
+      ? rendering.packetIncludedFiles
+      : rendering.selectedFiles;
+  const remainingFiles = Math.max(rendering.reviewableFiles - coveredFiles, 0);
+  const packetOmittedFiles =
+    typeof rendering.packetOmittedFiles === 'number' ? rendering.packetOmittedFiles : 0;
   const hasChangeCounts =
+    packetOmittedFiles === 0 &&
     typeof rendering.selectedChanges === 'number' &&
     typeof rendering.reviewableChanges === 'number';
   const remainingChanges = hasChangeCounts
@@ -344,7 +524,7 @@ function formatRemainingCoverage(rendering) {
 
 function formatFallbackFollowUp(rendering) {
   if (rendering.mode === 'triage') {
-    return 'Focus manual review on the hotspot files above, and use `/review` for a deeper pass when release, auth, config, or workflow paths changed.';
+    return 'Focus manual review on the selected files above, and use `/review` for a deeper pass when release, auth, config, or workflow paths changed.';
   }
 
   return 'Use `/review` when you need a deeper maintainer rerun with more surrounding context.';
@@ -374,7 +554,11 @@ export function normalizeStructuredOutput(raw) {
   if (!overallRationale.ok) return overallRationale;
 
   const findings = Array.isArray(parsed.findings) ? parsed.findings : null;
-  const securityChecklist = normalizeChecklistRows('securityChecklist', 'check', parsed.securityChecklist);
+  const securityChecklist = normalizeChecklistRows(
+    'securityChecklist',
+    'check',
+    parsed.securityChecklist
+  );
   if (!securityChecklist.ok) return securityChecklist;
 
   const ccsCompliance = normalizeChecklistRows('ccsCompliance', 'rule', parsed.ccsCompliance);
@@ -409,12 +593,18 @@ export function normalizeStructuredOutput(raw) {
 
     const fix = validatePlainTextField(`findings[${index}].fix`, finding?.fix);
     if (!fix.ok) return fix;
+    const snippets = normalizeFindingSnippets(`findings[${index}].snippets`, finding?.snippets);
+    if (!snippets.ok) return snippets;
 
     let line = null;
     if (finding && Object.hasOwn(finding, 'line')) {
       if (finding.line === null) {
         line = null;
-      } else if (typeof finding.line === 'number' && Number.isInteger(finding.line) && finding.line > 0) {
+      } else if (
+        typeof finding.line === 'number' &&
+        Number.isInteger(finding.line) &&
+        finding.line > 0
+      ) {
         line = finding.line;
       } else {
         return { ok: false, reason: `findings[${index}].line is invalid` };
@@ -433,6 +623,7 @@ export function normalizeStructuredOutput(raw) {
       what: what.value,
       why: why.value,
       fix: fix.value,
+      snippets: snippets.value,
     });
   }
 
@@ -454,60 +645,170 @@ export function normalizeStructuredOutput(raw) {
   return { ok: true, value };
 }
 
-function renderChecklistTable(title, labelHeader, labelKey, rows) {
-  const lines = ['', title, '', `| ${labelHeader} | Status | Notes |`, '|---|---|---|'];
+function renderChecklistTable(labelHeader, labelKey, rows) {
+  const lines = [`| ${labelHeader} | Status | Notes |`, '|---|---|---|'];
   for (const row of rows) {
     lines.push(
-      `| ${escapeMarkdownText(row[labelKey])} | ${STATUS_LABELS[row.status]} | ${escapeMarkdownText(row.notes)} |`
+      `| ${renderInlineText(row[labelKey])} | ${STATUS_LABELS[row.status]} | ${renderInlineText(row.notes)} |`
     );
   }
   return lines;
 }
 
-function renderBulletSection(title, items) {
+function renderBulletSection(items) {
   if (items.length === 0) return [];
-  return ['', title, ...items.map((item) => `- ${escapeMarkdownText(item)}`)];
+  return items.map((item) => `- ${renderInlineText(item)}`);
+}
+
+function renderFindingSnippets(snippets) {
+  if (!Array.isArray(snippets) || snippets.length === 0) {
+    return [];
+  }
+
+  const lines = [];
+  for (const snippet of snippets) {
+    const label = snippet.label ? `Evidence: ${renderInlineText(snippet.label)}` : 'Evidence:';
+    if (lines.length > 0) {
+      lines.push('');
+    }
+    lines.push(label, '', ...renderCodeBlock(snippet.code, snippet.language).split('\n'));
+  }
+
+  return lines;
+}
+
+function renderSection(title, bodyLines) {
+  if (!bodyLines.length) {
+    return [];
+  }
+
+  return ['', title, '', ...bodyLines];
+}
+
+function renderFindingReference(finding) {
+  return finding.line ? `${finding.file}:${finding.line}` : finding.file;
+}
+
+function getOrderedFindings(findings) {
+  return SEVERITY_ORDER.flatMap((severity) =>
+    findings.filter((finding) => finding.severity === severity)
+  );
+}
+
+function renderTopFindings(findings) {
+  if (findings.length === 0) {
+    return ['No confirmed issues found after reviewing the diff and surrounding code.'];
+  }
+
+  const orderedFindings = getOrderedFindings(findings);
+  const lines = orderedFindings
+    .slice(0, TOP_FINDINGS_LIMIT)
+    .map(
+      (finding) =>
+        `- ${SEVERITY_SUMMARY_LABELS[finding.severity]} ${renderCode(renderFindingReference(finding))} — ${renderInlineText(finding.title)}`
+    );
+
+  if (orderedFindings.length > TOP_FINDINGS_LIMIT) {
+    const remaining = orderedFindings.length - TOP_FINDINGS_LIMIT;
+    lines.push(`- ${remaining} more finding${remaining === 1 ? '' : 's'} in the details below.`);
+  }
+
+  return lines;
+}
+
+function renderDetailedFindings(findings) {
+  if (findings.length === 0) {
+    return [];
+  }
+
+  const lines = [];
+  for (const severity of SEVERITY_ORDER) {
+    const scopedFindings = findings.filter((finding) => finding.severity === severity);
+    if (scopedFindings.length === 0) continue;
+
+    lines.push(`**${SEVERITY_SUMMARY_LABELS[severity]} (${scopedFindings.length})**`, '');
+    for (const [index, finding] of scopedFindings.entries()) {
+      const snippets = Array.isArray(finding.snippets) ? finding.snippets : [];
+      lines.push(`#### ${index + 1}. ${renderInlineText(finding.title)}`);
+      lines.push(`- Location: ${renderCode(renderFindingReference(finding))}`);
+      lines.push(`- Impact: ${renderInlineText(finding.why)}`);
+      lines.push(`- Problem: ${renderInlineText(finding.what)}`);
+      lines.push(`- Fix: ${renderInlineText(finding.fix)}`);
+      if (snippets.length > 0) {
+        lines.push('', ...renderFindingSnippets(snippets));
+      }
+      lines.push('');
+    }
+  }
+
+  if (lines[lines.length - 1] === '') {
+    lines.pop();
+  }
+
+  return lines;
 }
 
 export function renderStructuredReview(review, { model, rendering: renderOptions } = {}) {
   const rendering = mergeRenderingMetadata(review?.rendering, renderOptions);
-  const lines = ['### 📋 Summary', '', escapeMarkdownText(review.summary), '', '### 🔍 Findings'];
+  const lines = ['### 📋 Summary', '', renderInlineText(review.summary)];
   const reviewContext = formatReviewContext(rendering);
 
   if (reviewContext) {
-    lines.splice(4, 0, reviewContext, '');
+    lines.push('', reviewContext);
   }
 
+  lines.push('', '### 🔍 Findings');
   if (review.findings.length === 0) {
-    lines.push('No confirmed issues found after reviewing the diff and surrounding code.');
+    lines.push('', 'No confirmed issues found after reviewing the diff and surrounding code.');
   } else {
     for (const severity of SEVERITY_ORDER) {
-      const findings = review.findings.filter((finding) => finding.severity === severity);
-      if (findings.length === 0) continue;
+      const scopedFindings = review.findings.filter((finding) => finding.severity === severity);
+      if (scopedFindings.length === 0) continue;
 
       lines.push('', SEVERITY_HEADERS[severity], '');
-      for (const finding of findings) {
-        const location = finding.line ? `${finding.file}:${finding.line}` : finding.file;
-        lines.push(`- **${renderCode(location)} — ${escapeMarkdownText(finding.title)}**`);
-        lines.push(`  Problem: ${escapeMarkdownText(finding.what)}`);
-        lines.push(`  Why it matters: ${escapeMarkdownText(finding.why)}`);
-        lines.push(`  Suggested fix: ${escapeMarkdownText(finding.fix)}`);
+      for (const finding of scopedFindings) {
+        const snippets = Array.isArray(finding.snippets) ? finding.snippets : [];
+        lines.push(
+          `- **${renderCode(renderFindingReference(finding))} — ${renderInlineText(finding.title)}**`
+        );
+        lines.push(`  Problem: ${renderInlineText(finding.what)}`);
+        lines.push(`  Why it matters: ${renderInlineText(finding.why)}`);
+        lines.push(`  Suggested fix: ${renderInlineText(finding.fix)}`);
+
+        if (snippets.length > 0) {
+          lines.push('');
+          lines.push(...renderFindingSnippets(snippets));
+        }
+
         lines.push('');
       }
     }
-    if (lines[lines.length - 1] === '') lines.pop();
+
+    if (lines[lines.length - 1] === '') {
+      lines.pop();
+    }
   }
 
-  lines.push(...renderChecklistTable('### 🔒 Security Checklist', 'Check', 'check', review.securityChecklist));
-  lines.push(...renderChecklistTable('### 📊 CCS Compliance', 'Rule', 'rule', review.ccsCompliance));
-  lines.push(...renderBulletSection('### 💡 Informational', review.informational));
-  lines.push(...renderBulletSection("### ✅ What's Done Well", review.strengths));
+  lines.push(
+    ...renderSection(
+      '### 🔒 Security Checklist',
+      renderChecklistTable('Check', 'check', review.securityChecklist)
+    )
+  );
+  lines.push(
+    ...renderSection(
+      '### 📊 CCS Compliance',
+      renderChecklistTable('Rule', 'rule', review.ccsCompliance)
+    )
+  );
+  lines.push(...renderSection('### 💡 Informational', renderBulletSection(review.informational)));
+  lines.push(...renderSection("### ✅ What's Done Well", renderBulletSection(review.strengths)));
 
   lines.push(
     '',
     '### 🎯 Overall Assessment',
     '',
-    `**${ASSESSMENTS[review.overallAssessment]}** — ${escapeMarkdownText(review.overallRationale)}`,
+    `**${ASSESSMENTS[review.overallAssessment]}** — ${renderInlineText(review.overallRationale)}`,
     '',
     `> 🤖 Reviewed by \`${model}\``
   );
@@ -535,11 +836,17 @@ export function renderIncompleteReview({
   ];
 
   if (rendering.mode) {
-    lines.push(`- Review mode: ${renderCode(rendering.mode)} (${escapeMarkdownText(REVIEW_MODE_DETAILS[rendering.mode])})`);
+    lines.push(
+      `- Review mode: ${renderCode(rendering.mode)} (${escapeMarkdownText(REVIEW_MODE_DETAILS[rendering.mode])})`
+    );
   }
   const scopeSummary = formatScopeSummary(rendering);
   if (scopeSummary) {
     lines.push(`- Review scope: ${escapeMarkdownText(scopeSummary)}`);
+  }
+  const packetCoverage = formatPacketCoverage(rendering);
+  if (packetCoverage) {
+    lines.push(`- Packet coverage: ${escapeMarkdownText(packetCoverage)}`);
   }
   const runtimeBudget = formatCombinedBudget(rendering);
   if (runtimeBudget) {
@@ -551,7 +858,9 @@ export function renderIncompleteReview({
   }
   const remainingCoverage = formatRemainingCoverage(rendering);
   if (remainingCoverage) {
-    lines.push(`- Remaining reviewable scope not fully covered: ${escapeMarkdownText(remainingCoverage)}`);
+    lines.push(
+      `- Remaining reviewable scope not fully covered: ${escapeMarkdownText(remainingCoverage)}`
+    );
   }
   lines.push(`- Manual follow-up: ${escapeMarkdownText(formatFallbackFollowUp(rendering))}`);
   if (runtimeTools?.length) {
@@ -561,7 +870,12 @@ export function renderIncompleteReview({
     lines.push(`- Turns used: ${turnsUsed}`);
   }
 
-  lines.push('', `Re-run \`/review\` or inspect [the workflow run](${runUrl}).`, '', `> 🤖 Reviewed by \`${model}\``);
+  lines.push(
+    '',
+    `Re-run \`/review\` or inspect [the workflow run](${runUrl}).`,
+    '',
+    `> 🤖 Reviewed by \`${model}\``
+  );
   return lines.join('\n');
 }
 
@@ -579,6 +893,9 @@ export function writeReviewFromEnv(env = process.env) {
     reviewableFiles: env.AI_REVIEW_REVIEWABLE_FILES,
     selectedChanges: env.AI_REVIEW_SELECTED_CHANGES,
     reviewableChanges: env.AI_REVIEW_REVIEWABLE_CHANGES,
+    packetIncludedFiles: env.AI_REVIEW_PACKET_INCLUDED_FILES,
+    packetTotalFiles: env.AI_REVIEW_PACKET_TOTAL_FILES,
+    packetOmittedFiles: env.AI_REVIEW_PACKET_OMITTED_FILES,
     scopeLabel: env.AI_REVIEW_SCOPE_LABEL,
     maxTurns: env.AI_REVIEW_MAX_TURNS,
     timeoutMinutes: env.AI_REVIEW_TIMEOUT_MINUTES ?? env.AI_REVIEW_TIMEOUT_MINUTES_BUDGET,
@@ -601,15 +918,16 @@ export function writeReviewFromEnv(env = process.env) {
   fs.writeFileSync(outputFile, `${content}\n`, 'utf8');
 
   if (!validation.ok) {
-    console.warn(`::warning::AI review output normalization fell back to incomplete comment: ${validation.reason}`);
+    console.warn(
+      `::warning::AI review output normalization fell back to incomplete comment: ${validation.reason}`
+    );
   }
 
   return { usedFallback: !validation.ok, content };
 }
 
 const isMain =
-  process.argv[1] &&
-  path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url));
+  process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url));
 
 if (isMain) {
   writeReviewFromEnv();

@@ -1,50 +1,27 @@
 import { describe, expect, test } from 'bun:test';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import * as yaml from 'js-yaml';
 
 function loadWorkflow() {
   const workflowPath = path.resolve(import.meta.dir, '../../../../.github/workflows/ai-review.yml');
-  return yaml.load(fs.readFileSync(workflowPath, 'utf8')) as {
-    jobs: {
-      review: {
-        steps: Array<Record<string, any>>;
-      };
-    };
-  };
+  return fs.readFileSync(workflowPath, 'utf8');
 }
 
 describe('ai-review workflow', () => {
-  test('uses the self-hosted Claude binary instead of reinstalling it on internal PRs', () => {
+  test('uses the claude-code-action reviewer path with glm-5-turbo and PR-sha comment markers', () => {
     const workflow = loadWorkflow();
-    const steps = workflow.jobs.review.steps;
 
-    const toolchainStep = steps.find((step) => step.id === 'toolchain');
-    expect(toolchainStep).toBeDefined();
-    expect(toolchainStep?.name).toBe('Resolve self-hosted Claude executable');
-    expect(toolchainStep?.run).toContain('command -v claude');
-    expect(toolchainStep?.run).toContain('"/home/github-runner/.local/bin/claude"');
-    expect(toolchainStep?.run).toContain('"/root/.local/bin/claude"');
-    expect(toolchainStep?.run).toContain('Missing self-hosted Claude executable. Checked:');
-    expect(toolchainStep?.run).toContain('echo "claude_path=$CLAUDE_PATH" >> "$GITHUB_OUTPUT"');
-
-    const claudeReviewStep = steps.find((step) => step.id === 'claude-review');
-    expect(claudeReviewStep).toBeDefined();
-    expect(claudeReviewStep?.uses).toBe('anthropics/claude-code-action@v1');
-    expect(claudeReviewStep?.['continue-on-error']).toBe(true);
-    expect(claudeReviewStep?.with?.path_to_claude_code_executable).toBe(
-      '${{ steps.toolchain.outputs.claude_path }}'
-    );
-    expect(claudeReviewStep?.with?.claude_args).toContain('--tools "Read"');
-    expect(claudeReviewStep?.with?.claude_args).toContain('--disallowedTools "Bash,Edit"');
-
-    const promptStep = steps.find((step) => step.id === 'review-prompt');
-    expect(promptStep).toBeDefined();
-    expect(promptStep?.run).toContain("printf '%s\\n' \\");
-    expect(promptStep?.run).not.toContain("| sed 's/^            //'");
-
-    const reviewScopeStep = steps.find((step) => step.id === 'review-scope');
-    expect(reviewScopeStep).toBeDefined();
-    expect(reviewScopeStep?.env?.AI_REVIEW_PR_SIZE_CLASS).toBe('${{ needs.prepare.outputs.pr_size_class }}');
+    expect(workflow).toContain('REVIEW_MODEL: glm-5-turbo');
+    expect(workflow).toContain('ANTHROPIC_MODEL: glm-5-turbo');
+    expect(workflow).toContain('uses: anthropics/claude-code-action@v1');
+    expect(workflow).toContain('--model ${{ env.REVIEW_MODEL }}');
+    expect(workflow).toContain('--max-turns 40');
+    expect(workflow).toContain('--json-schema');
+    expect(workflow).toContain('normalize-ai-review-output.mjs');
+    expect(workflow).not.toContain('build-ai-review-packet.mjs');
+    expect(workflow).not.toContain('run-ai-review-direct.mjs');
+    expect(workflow).toContain('pr:${{ needs.prepare.outputs.pr_number }}');
+    expect(workflow).toContain('sha:${{ needs.prepare.outputs.head_sha }}');
+    expect(workflow).not.toContain('run:${{ github.run_id }}');
   });
 });

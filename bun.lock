@@ -52,6 +52,7 @@
         "eslint": "^9.39.1",
         "eslint-config-prettier": "^10.1.8",
         "husky": "^9.1.7",
+        "marked": "^15.0.12",
         "mocha": "^11.7.5",
         "prettier": "^3.6.2",
         "semantic-release": "^25.0.2",
