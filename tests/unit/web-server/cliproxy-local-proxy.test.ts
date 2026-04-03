@@ -30,6 +30,25 @@ async function createBackendServer(
   return { port, server };
 }
 
+async function reserveUnusedPort(): Promise<number> {
+  const server = http.createServer();
+
+  return await new Promise<number>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      server.off('error', reject);
+      const port = (server.address() as AddressInfo).port;
+      server.close((closeError) => {
+        if (closeError) {
+          reject(closeError);
+          return;
+        }
+        resolve(port);
+      });
+    });
+  });
+}
+
 async function createProxyServer(options: {
   enforceAccess?: CliproxyLocalProxyDeps['enforceAccess'];
   resolveTargetPort: () => number;
@@ -138,9 +157,9 @@ describe('cliproxy local proxy route', () => {
   });
 
   it('returns 502 when CLIProxy is not reachable', async () => {
-    // Use a port with nothing listening
+    const unusedPort = await reserveUnusedPort();
     const proxy = await createProxyServer({
-      resolveTargetPort: () => 19999,
+      resolveTargetPort: () => unusedPort,
       enforceAccess: () => true,
     });
 

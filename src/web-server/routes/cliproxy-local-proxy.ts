@@ -71,6 +71,26 @@ function buildProxyHeaders(
   return proxyHeaders;
 }
 
+function sendProxyUnavailable(res: Response): void {
+  if (res.headersSent || res.writableEnded) {
+    return;
+  }
+
+  const body = JSON.stringify({ error: 'CLIProxy is not reachable' });
+  res.writeHead(502, {
+    'Content-Type': 'application/json',
+    'Content-Length': String(Buffer.byteLength(body)),
+  });
+  res.end(body);
+}
+
+function isEmptyUnavailableProxyResponse(proxyRes: http.IncomingMessage): boolean {
+  const contentLength = proxyRes.headers['content-length'];
+  const normalizedContentLength = Array.isArray(contentLength) ? contentLength[0] : contentLength;
+
+  return proxyRes.statusCode === 502 && normalizedContentLength === '0';
+}
+
 export function createCliproxyLocalProxyRouter(deps: CliproxyLocalProxyDeps = {}): Router {
   const router = Router();
   const enforceAccess =
@@ -105,6 +125,14 @@ export function createCliproxyLocalProxyRouter(deps: CliproxyLocalProxyDeps = {}
         timeout: PROXY_TIMEOUT_MS,
       },
       (proxyRes) => {
+        // Bun can synthesize an empty 502 response for unreachable localhost
+        // connections instead of emitting ECONNREFUSED like Node does.
+        if (isEmptyUnavailableProxyResponse(proxyRes)) {
+          proxyRes.resume();
+          sendProxyUnavailable(res);
+          return;
+        }
+
         res.writeHead(proxyRes.statusCode ?? 502, proxyRes.headers);
         // Manual streaming instead of pipe() for Bun runtime compatibility
         proxyRes.on('data', (chunk: Buffer) => res.write(chunk));
@@ -112,12 +140,13 @@ export function createCliproxyLocalProxyRouter(deps: CliproxyLocalProxyDeps = {}
       }
     );
 
-    proxyReq.on('timeout', () => proxyReq.destroy());
+    proxyReq.on('timeout', () => {
+      sendProxyUnavailable(res);
+      proxyReq.destroy(new Error('CLIProxy request timeout'));
+    });
 
     proxyReq.on('error', () => {
-      if (!res.headersSent) {
-        res.status(502).json({ error: 'CLIProxy is not reachable' });
-      }
+      sendProxyUnavailable(res);
     });
 
     // Clean up proxy connection when client disconnects.

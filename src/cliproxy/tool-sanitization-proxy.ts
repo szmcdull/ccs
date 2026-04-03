@@ -468,6 +468,17 @@ export class ToolSanitizationProxy {
     upstreamUrl: URL
   ): Promise<void> {
     return new Promise((resolve, reject) => {
+      let settled = false;
+      const resolveOnce = () => {
+        if (settled) return;
+        settled = true;
+        resolve();
+      };
+      const rejectOnce = (error: Error) => {
+        if (settled) return;
+        settled = true;
+        reject(error);
+      };
       const requestFn = this.getRequestFn(upstreamUrl);
       const upstreamReq = requestFn(
         {
@@ -482,13 +493,17 @@ export class ToolSanitizationProxy {
         (upstreamRes) => {
           clientRes.writeHead(upstreamRes.statusCode || 200, upstreamRes.headers);
           upstreamRes.pipe(clientRes);
-          upstreamRes.on('end', () => resolve());
-          upstreamRes.on('error', reject);
+          upstreamRes.on('end', () => resolveOnce());
+          upstreamRes.on('error', (error) => rejectOnce(error as Error));
         }
       );
 
-      upstreamReq.on('timeout', () => upstreamReq.destroy(new Error('Upstream request timeout')));
-      upstreamReq.on('error', reject);
+      upstreamReq.on('timeout', () => {
+        const timeoutError = new Error('Upstream request timeout');
+        upstreamReq.destroy(timeoutError);
+        rejectOnce(timeoutError);
+      });
+      upstreamReq.on('error', (error) => rejectOnce(error as Error));
       originalReq.pipe(upstreamReq);
     });
   }
@@ -504,6 +519,17 @@ export class ToolSanitizationProxy {
     mapper: ToolNameMapper
   ): Promise<void> {
     return new Promise((resolve, reject) => {
+      let settled = false;
+      const resolveOnce = () => {
+        if (settled) return;
+        settled = true;
+        resolve();
+      };
+      const rejectOnce = (error: Error) => {
+        if (settled) return;
+        settled = true;
+        reject(error);
+      };
       const bodyString = JSON.stringify(body);
       const requestFn = this.getRequestFn(upstreamUrl);
       const upstreamReq = requestFn(
@@ -539,7 +565,7 @@ export class ToolSanitizationProxy {
 
                     clientRes.writeHead(upstreamRes.statusCode || 200, headers);
                     clientRes.end(modifiedResponse);
-                    resolve();
+                    resolveOnce();
                     return;
                   }
                 } catch {
@@ -550,17 +576,21 @@ export class ToolSanitizationProxy {
               // Pass through unchanged
               clientRes.writeHead(upstreamRes.statusCode || 200, upstreamRes.headers);
               clientRes.end(responseBody);
-              resolve();
+              resolveOnce();
             } catch (err) {
-              reject(err);
+              rejectOnce(err as Error);
             }
           });
-          upstreamRes.on('error', reject);
+          upstreamRes.on('error', (error) => rejectOnce(error as Error));
         }
       );
 
-      upstreamReq.on('timeout', () => upstreamReq.destroy(new Error('Upstream request timeout')));
-      upstreamReq.on('error', reject);
+      upstreamReq.on('timeout', () => {
+        const timeoutError = new Error('Upstream request timeout');
+        upstreamReq.destroy(timeoutError);
+        rejectOnce(timeoutError);
+      });
+      upstreamReq.on('error', (error) => rejectOnce(error as Error));
       upstreamReq.write(bodyString);
       upstreamReq.end();
     });
@@ -578,6 +608,17 @@ export class ToolSanitizationProxy {
     mapper: ToolNameMapper
   ): Promise<void> {
     return new Promise((resolve, reject) => {
+      let settled = false;
+      const resolveOnce = () => {
+        if (settled) return;
+        settled = true;
+        resolve();
+      };
+      const rejectOnce = (error: Error) => {
+        if (settled) return;
+        settled = true;
+        reject(error);
+      };
       const bodyString = JSON.stringify(body);
       const requestFn = this.getRequestFn(upstreamUrl);
       const upstreamReq = requestFn(
@@ -646,9 +687,9 @@ export class ToolSanitizationProxy {
               } catch {
                 // Client may have disconnected — safe to ignore
               }
-              resolve();
+              resolveOnce();
             });
-            upstreamRes.on('error', reject);
+            upstreamRes.on('error', (error) => rejectOnce(error as Error));
             return;
           }
 
@@ -701,15 +742,19 @@ export class ToolSanitizationProxy {
             } catch {
               // Client may have disconnected — safe to ignore
             }
-            resolve();
+            resolveOnce();
           });
 
-          upstreamRes.on('error', reject);
+          upstreamRes.on('error', (error) => rejectOnce(error as Error));
         }
       );
 
-      upstreamReq.on('timeout', () => upstreamReq.destroy(new Error('Upstream request timeout')));
-      upstreamReq.on('error', reject);
+      upstreamReq.on('timeout', () => {
+        const timeoutError = new Error('Upstream request timeout');
+        upstreamReq.destroy(timeoutError);
+        rejectOnce(timeoutError);
+      });
+      upstreamReq.on('error', (error) => rejectOnce(error as Error));
       upstreamReq.write(bodyString);
       upstreamReq.end();
     });
