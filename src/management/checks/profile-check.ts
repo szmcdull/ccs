@@ -34,7 +34,7 @@ export class ProfilesChecker implements IHealthChecker {
       try {
         const yaml = require('js-yaml');
         const content = fs.readFileSync(configYamlPath, 'utf8');
-        const config = yaml.load(content) as Record<string, unknown>;
+        const config = yaml.load(content, { schema: yaml.CORE_SCHEMA }) as Record<string, unknown>;
         this.validateProfiles(config, 'config.yaml', spinner, results);
         return;
       } catch (e) {

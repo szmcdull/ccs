@@ -139,7 +139,7 @@ export async function startServer(options: ServerOptions): Promise<ServerInstanc
 
     try {
       if (options.host) {
-        server.listen(options.port, options.host, onListening);
+        server.listen(options.port, options.host ?? '127.0.0.1', onListening);
         return;
       }
 

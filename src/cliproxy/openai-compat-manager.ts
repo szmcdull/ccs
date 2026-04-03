@@ -55,7 +55,7 @@ function loadConfig(): ConfigYaml {
 
   try {
     const content = fs.readFileSync(configPath, 'utf-8');
-    return (yaml.load(content) as ConfigYaml) || {};
+    return (yaml.load(content, { schema: yaml.CORE_SCHEMA }) as ConfigYaml) || {};
   } catch {
     return {};
   }

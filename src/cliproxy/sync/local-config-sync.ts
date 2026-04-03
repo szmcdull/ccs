@@ -211,7 +211,10 @@ export function getLocalSyncStatus(): {
   if (fs.existsSync(configPath)) {
     try {
       const content = fs.readFileSync(configPath, 'utf8');
-      const config = yaml.load(content) as Record<string, unknown> | null;
+      const config = yaml.load(content, { schema: yaml.CORE_SCHEMA }) as Record<
+        string,
+        unknown
+      > | null;
       if (config && typeof config === 'object') {
         const keys = config['claude-api-key'];
         if (Array.isArray(keys)) {

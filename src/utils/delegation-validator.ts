@@ -164,7 +164,7 @@ export class DelegationValidator {
       try {
         const yaml = require('js-yaml');
         const content = fs.readFileSync(configPath, 'utf8');
-        const config = yaml.load(content) as Record<string, unknown>;
+        const config = yaml.load(content, { schema: yaml.CORE_SCHEMA }) as Record<string, unknown>;
 
         if (config.profiles && typeof config.profiles === 'object') {
           for (const profileName of Object.keys(config.profiles as object)) {

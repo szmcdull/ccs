@@ -72,7 +72,7 @@ function readLocalConfig(): LocalAiProviderConfig {
 
   try {
     const content = fs.readFileSync(configPath, 'utf8');
-    return (yaml.load(content) as LocalAiProviderConfig) || {};
+    return (yaml.load(content, { schema: yaml.CORE_SCHEMA }) as LocalAiProviderConfig) || {};
   } catch {
     return {};
   }

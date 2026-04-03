@@ -422,7 +422,10 @@ function extractFrontmatterDescription(content: string): string | null {
   }
 
   try {
-    const parsed = yaml.load(frontmatterMatch[1]) as Record<string, unknown> | null;
+    const parsed = yaml.load(frontmatterMatch[1], { schema: yaml.CORE_SCHEMA }) as Record<
+      string,
+      unknown
+    > | null;
     const description = parsed?.description;
     if (typeof description !== 'string') {
       return null;

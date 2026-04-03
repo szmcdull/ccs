@@ -50,7 +50,7 @@ export class ConfigFilesChecker implements IHealthChecker {
       try {
         const yaml = require('js-yaml');
         const content = fs.readFileSync(configYamlPath, 'utf8');
-        yaml.load(content);
+        yaml.load(content, { schema: yaml.CORE_SCHEMA });
         spinner.succeed();
         console.log(`  ${ok('config.yaml'.padEnd(22))}  Valid`);
         results.addCheck('config.yaml', 'success', undefined, undefined, {

@@ -188,7 +188,7 @@ export function loadUnifiedConfig(): UnifiedConfig | null {
 
   try {
     const content = fs.readFileSync(yamlPath, 'utf8');
-    const parsed = yaml.load(content);
+    const parsed = yaml.load(content, { schema: yaml.CORE_SCHEMA });
 
     if (!isUnifiedConfig(parsed)) {
       throw new Error(`Invalid config format in ${yamlPath}`);
@@ -938,7 +938,7 @@ function loadUnifiedConfigWithLockHeld(): UnifiedConfig {
   }
 
   const content = fs.readFileSync(yamlPath, 'utf8');
-  const parsed = yaml.load(content);
+  const parsed = yaml.load(content, { schema: yaml.CORE_SCHEMA });
 
   if (!isUnifiedConfig(parsed)) {
     throw new Error(`Invalid config format in ${yamlPath}`);
