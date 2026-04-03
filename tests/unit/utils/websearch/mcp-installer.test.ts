@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { getHookPath } from '../../../../src/utils/websearch/hook-config';
+import { getNodeWebSearchArgs, getNodeWebSearchEnv } from '../../../../src/utils/websearch/node-proxy-launch';
 import {
   ensureWebSearchMcp,
   getWebSearchMcpServerName,
@@ -42,8 +43,8 @@ describe('ensureWebSearchMcp', () => {
     return {
       type: 'stdio',
       command: 'node',
-      args: [getWebSearchMcpServerPath()],
-      env: {},
+      args: getNodeWebSearchArgs(getWebSearchMcpServerPath()),
+      env: getNodeWebSearchEnv(),
     };
   }
 

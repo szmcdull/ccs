@@ -7,6 +7,7 @@
  */
 
 import { getWebSearchConfig } from '../../config/unified-config-loader';
+import { getNodeWebSearchEnv } from './node-proxy-launch';
 import { resolveAllowedWebSearchTraceFile } from './trace';
 
 /**
@@ -18,7 +19,7 @@ import { resolveAllowedWebSearchTraceFile } from './trace';
  */
 export function getWebSearchHookEnv(): Record<string, string> {
   const wsConfig = getWebSearchConfig();
-  const env: Record<string, string> = {};
+  const env: Record<string, string> = { ...getNodeWebSearchEnv() };
 
   if (process.env.CCS_WEBSEARCH_TRACE === '1' || process.env.CCS_DEBUG === '1') {
     env.CCS_WEBSEARCH_TRACE = '1';

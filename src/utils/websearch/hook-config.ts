@@ -13,6 +13,7 @@ import { getWebSearchConfig } from '../../config/unified-config-loader';
 import { getCcsHooksDir } from '../config-manager';
 import { getClaudeSettingsPath } from '../claude-config-path';
 import { isCcsWebSearchHook, deduplicateCcsHooks } from './hook-utils';
+import { buildNodeWebSearchCommand } from './node-proxy-launch';
 
 // Hook file name
 const WEBSEARCH_HOOK = 'websearch-transformer.cjs';
@@ -36,6 +37,7 @@ export function getHookPath(): string {
  */
 export function getWebSearchHookConfig(): Record<string, unknown> {
   const hookPath = getHookPath();
+  const hookCommand = buildNodeWebSearchCommand(hookPath);
   const wsConfig = getWebSearchConfig();
 
   // Compute max timeout from enabled providers
@@ -61,7 +63,7 @@ export function getWebSearchHookConfig(): Record<string, unknown> {
         hooks: [
           {
             type: 'command',
-            command: `node "${hookPath}"`,
+            command: hookCommand,
             timeout: hookTimeout,
           },
         ],
@@ -97,7 +99,7 @@ export function ensureHookConfig(): boolean {
     // Check if WebSearch hook already configured
     const hooks = settings.hooks as Record<string, unknown[]> | undefined;
     const expectedHookPath = getHookPath();
-    const expectedCommand = `node "${expectedHookPath}"`;
+    const expectedCommand = buildNodeWebSearchCommand(expectedHookPath);
 
     if (hooks?.PreToolUse) {
       const webSearchHookIndex = hooks.PreToolUse.findIndex((h: unknown) => {

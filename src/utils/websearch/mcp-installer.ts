@@ -10,6 +10,7 @@ import { getClaudeUserConfigPath } from '../claude-config-path';
 import { info, warn } from '../ui';
 import { InstanceManager } from '../../management/instance-manager';
 import { installWebSearchHook } from './hook-installer';
+import { getNodeWebSearchArgs, getNodeWebSearchEnv } from './node-proxy-launch';
 import { appendWebSearchTrace } from './trace';
 
 const WEBSEARCH_MCP_SERVER = 'ccs-websearch-server.cjs';
@@ -23,7 +24,7 @@ interface ClaudeUserConfig {
 interface ManagedWebSearchMcpConfig {
   type: 'stdio';
   command: 'node';
-  args: [string];
+  args: string[];
   env: Record<string, string>;
 }
 
@@ -264,8 +265,8 @@ export function ensureWebSearchMcpConfig(): boolean {
   const desiredServerConfig: ManagedWebSearchMcpConfig = {
     type: 'stdio',
     command: 'node',
-    args: [getWebSearchMcpServerPath()],
-    env: {},
+    args: getNodeWebSearchArgs(getWebSearchMcpServerPath()),
+    env: getNodeWebSearchEnv(),
   };
 
   const currentConfig = existingServers[WEBSEARCH_MCP_SERVER_NAME];

@@ -14,6 +14,7 @@ import * as childProcess from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { getNodeWebSearchArgs, getNodeWebSearchEnv } from '../../../src/utils/websearch/node-proxy-launch';
 
 type SpawnCall = {
   command: string;
@@ -379,8 +380,8 @@ describe('CLAUDECODE environment stripping', () => {
     expect(claudeUserConfig.mcpServers?.['ccs-websearch']).toEqual({
       type: 'stdio',
       command: 'node',
-      args: [path.join(ccsDir, 'mcp', 'ccs-websearch-server.cjs')],
-      env: {},
+      args: getNodeWebSearchArgs(path.join(ccsDir, 'mcp', 'ccs-websearch-server.cjs')),
+      env: getNodeWebSearchEnv(),
     });
   });
 
